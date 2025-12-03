@@ -400,5 +400,5 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 
-# MacOS Desktop Services Directory
-.DS_Store
+# MacOS Desktop Services Files
+**/.DS_Store
