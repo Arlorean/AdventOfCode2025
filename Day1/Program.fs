@@ -10,7 +10,7 @@ let parseTurn s =
     | Success (('R',n),_,_) -> Some -n
     | _ -> None
 
-let applyTurn (position:int) (clicks:int) = (position+clicks)%100 
+let applyTurn position clicks = (position+clicks)%100 
 
 let getPassword startPosition inputFile = 
     File.ReadLines inputFile
