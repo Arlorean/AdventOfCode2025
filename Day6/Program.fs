@@ -12,7 +12,7 @@ let getColumn col row =
     Array.get row col
 
 let evalColumn (rows:string[][]) col =
-    let lastRow = rows.Length - 1;
+    let lastRow = rows.Length - 1
     let fn = 
         match rows[lastRow][col] with
         | "+" -> (+)
