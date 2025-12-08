@@ -1,5 +1,6 @@
 ﻿open System
 open System.IO
+open System.Collections.Generic
 
 let rows inputFile =
     File.ReadAllLines inputFile
@@ -29,3 +30,28 @@ let result input =
 let (beamMap, splitCount) = result "input.txt"
 printfn "Part 1 Result: %d splits:%s" splitCount beamMap
 
+
+let traverseTimelines (row,col) (manifolds:string[]) =
+    let cache = Dictionary<struct(int*int), int64>()
+    let rec traverse (row,col) =
+        let key = struct(row, col)
+        if not (cache.ContainsKey key) then
+            cache[key] <-
+                if row >= manifolds.Length then
+                    1L
+                else
+                    if manifolds[row][col] = '^' then
+                        traverse (row,col-1) + traverse (row,col+1)
+                    else
+                        traverse (row+1,col)
+        cache[key]
+    traverse (row,col)
+
+let result2 input = 
+    let manifolds =
+        rows input
+    manifolds 
+        |> traverseTimelines (1,manifolds[0].IndexOf 'S')
+
+printfn "Part 2 Result: %d timelines" (result2 "input.txt")
+ 
