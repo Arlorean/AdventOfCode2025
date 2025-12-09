@@ -32,44 +32,53 @@ let rec pairs list =
         | _ -> ()
     }    
 
-let shortestPairs input pairCount = 
+let pairsOrderedByDistance input = 
     readPoints input
     |> pairs
     |> Seq.toArray
     |> Array.sortBy distance
-    |> Array.take pairCount
 
-let inline pairToSet (p0, p1) = Set.ofArray [|p0; p1|]
-
-let connectCircuits input pairCount =
-    let pairs = shortestPairs input pairCount
-    let mutable circuits : Set<(_)>[] = Array.empty
+let connectCircuits (pairs : ((int64*int64*int64)*(int64*int64*int64))[]) =
+    let mutable circuits= Array.empty
     for i in 0 .. pairs.Length - 1 do
-        let i0 = circuits |> Array.tryFindIndex (Set.contains (fst pairs[i]))
-        let i1 = circuits |> Array.tryFindIndex (Set.contains (snd pairs[i])) 
+        let (p0,p1) = pairs[i]
+        let i0 = circuits |> Array.tryFindIndex (List.contains p0)
+        let i1 = circuits |> Array.tryFindIndex (List.contains p1) 
         do match i0, i1 with
             | None, None ->
-                circuits <- Array.append circuits [|(pairToSet pairs[i])|]
+                circuits <- Array.append circuits [| [p0; p1] |]
             | Some i0, None ->
-                circuits[i0] <- circuits[i0] + (pairToSet pairs[i])
+                circuits[i0] <- p0::p1::List.except [p0] circuits[i0]
             | None, Some i1 ->
-                circuits[i1] <- circuits[i1] + (pairToSet pairs[i])
+                circuits[i1] <- p0::p1::List.except [p1] circuits[i1]
             | Some i0, Some i1 when i0 <> i1 -> 
-                circuits[i0] <- circuits[i0] + circuits[i1]
+                circuits[i0] <- p0::p1::(List.except [p0] circuits[i0] @ List.except [p1] circuits[i1])
                 circuits <- Array.removeAt i1 circuits
             | _ -> ()
     circuits
 
-let connectCircuitsSum circuits topCount = 
-    circuits
-    |> Array.map Set.count
+let result1 input pairCount topCount = 
+    pairsOrderedByDistance input
+    |> Array.take pairCount
+    |> connectCircuits
+    |> Array.map List.length
     |> Array.sortDescending
     |> Array.take topCount
     |> Array.fold (*) 1
 
-let result1 input pairCount topCount =
-    connectCircuits input pairCount
-    |> connectCircuitsSum <| topCount
-
 printfn "Part 1 Example: %A" (result1 "example.txt" 10 3)
 printfn "Part 1 Result: %A" (result1 "input.txt" 1000 3)
+
+
+let result2 input = 
+    let completeCircuit =
+        pairsOrderedByDistance input
+        |> connectCircuits
+        |> Array.head
+    match completeCircuit with
+    | (x0,_,_)::(x1,_,_)::_ -> x0 * x1
+    | _ -> failwith "Not enough points in circuit"
+
+
+printfn "Part 2 Example: %A" (result2 "example.txt")
+printfn "Part 2 Input: %A" (result2 "input.txt")
