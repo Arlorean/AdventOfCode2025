@@ -1,6 +1,9 @@
 ﻿open System
 open System.IO
 open FParsec
+open Microsoft.Z3
+open Microsoft.Z3.Int
+open Microsoft.Z3.Bool
 
 type Machine = {
     Lights: int
@@ -170,6 +173,107 @@ let result2 input =
     parseMachinesFile input
     |> Seq.map machineResult2
 
-printfn "Part 2 Example: %A" (result2 "example.txt")
+//printfn "Part 2 Example: %A" (result2 "example.txt")
 //printfn "Part 2 Result: %A" (result2 "input.txt")
 
+// 3 = e + f
+// 5 = b + f
+// 4 = c + d + e
+// 7 = a + b + d
+
+let test=
+    let a = Int("a")
+    let b = Int("b")
+    let c = Int("c")
+    let d = Int("d")
+    let e = Int("e")
+    let f = Int("f")
+    let sum = Int("sum")
+
+    let constraints = [|
+        a >=. 0I
+        b >=. 0I
+        c >=. 0I
+        d >=. 0I
+        e >=. 0I
+        f >=. 0I
+
+        e + f =. 3I
+        b + f =. 5I
+        c + d + e =. 4I
+        a + b + d =. 7I
+
+        sum =. a + b + c + d + e + f
+    |]
+    let constraintExprs = 
+        constraints
+        |> Array.map (fun c -> c.Expr :?> BoolExpr)
+
+    let optimizer = Gs.context().MkOptimize()
+    optimizer.Add constraintExprs
+    optimizer.MkMinimize(sum.Expr :?> ArithExpr) |> ignore
+
+    match optimizer.Check() with
+    | Status.SATISFIABLE ->
+        let model = optimizer.Model
+        printfn "Z3 Success: %O" (model.Evaluate sum.Expr)
+    | failure ->
+        printfn "Z3 Failure: %O" failure
+
+test |> ignore
+
+
+let toArithExpr (expr:Expr) = expr :?> ArithExpr
+
+let solve machine =
+    let context = new Context()
+    let optimizer = context.MkOptimize()
+
+    let mkButtonVar buttonIndex =
+        let var = context.MkInt($"button_{buttonIndex}")
+        context.MkGe(var, context.MkInt(0)) |> optimizer.Add
+        var
+
+    let buttonVars =
+        [0..machine.Buttons.Length - 1]
+        |> List.map mkButtonVar
+        |> List.toArray
+
+    let mkJoltageExpr joltageIndex =
+        let sumExpr =
+            buttonIndicesAffectingJoltage machine joltageIndex
+            |> Array.map (Array.get buttonVars)
+            |> Array.map toArithExpr
+            |> context.MkAdd
+        let joltageValueExpr = context.MkInt(machine.Joltages[joltageIndex])
+        let joltageExpr = context.MkEq(sumExpr, joltageValueExpr)
+        optimizer.Add(joltageExpr) |> ignore
+        joltageExpr
+
+    let joltageExprs =
+        [0..machine.Joltages.Length - 1]
+        |> List.map mkJoltageExpr
+        |> List.toArray
+
+    let totalPressesExpr =
+        buttonVars
+        |> Array.map toArithExpr
+        |> context.MkAdd
+
+    optimizer.Add(joltageExprs) |> ignore
+    optimizer.MkMinimize(totalPressesExpr) |> ignore
+
+    match optimizer.Check() with
+    | Status.SATISFIABLE ->
+        let model = optimizer.Model
+        let totalPresses = model.Evaluate(totalPressesExpr) :?> IntNum
+        Some (int totalPresses.Int)
+    | _ ->
+        None
+
+let resultz input = 
+    parseMachinesFile input
+    |> Seq.map solve
+
+resultz "example.txt"
+    |> Seq.iter (printfn "%A")
