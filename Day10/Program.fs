@@ -2,8 +2,6 @@
 open System.IO
 open FParsec
 open Microsoft.Z3
-open Microsoft.Z3.Int
-open Microsoft.Z3.Bool
 
 type Machine = {
     Lights: int
