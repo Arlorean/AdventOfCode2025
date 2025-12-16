@@ -42,7 +42,8 @@ type Shape = { Bits : uint16; } with
         with get (rows: Range, cols: Range) = this.GetCellRange (rows, cols)
 
     member this.GetCell (row,col) =
-        this.Bits &&& (Shape.CellBitMask row col) <> 0us
+        if row < 0 || row >= Shape.Height || col < 0 || col >= Shape.Width then false
+        else this.Bits &&& (Shape.CellBitMask row col) <> 0us
 
     member this.GetCell2 row col =
         this.GetCell (row,col)
@@ -69,20 +70,28 @@ type Shape = { Bits : uint16; } with
 
     static member CellOffsets =
         seq {
-            for rowOffset in 0..Shape.Width-1 do
-                for colOffset in 0..Shape.Height-1 do
+            for rowOffset in 0..Shape.Height-1 do
+                for colOffset in 0..Shape.Width-1 do
                     yield (rowOffset, colOffset)
         }
+
+    static member AdjacentCellOffsets = 
+        seq {
+            for rowOffset in -(Shape.Height-1)..Shape.Height-1 do
+                for colOffset in -(Shape.Width-1)..Shape.Width-1 do
+                    yield (rowOffset, colOffset)
+        }
+
 
     static member Init getCell =
         let mutable bits: uint16 = 0us
         for row, col in Shape.CellOffsets do
-            if getCell row col then
+            if getCell (row,col) then
                 bits <- bits ||| Shape.CellBitMask row col
         { Bits = bits }
 
     static member Create(cells:bool[][]) = 
-        let cell r c = cells[r][c]
+        let cell (r,c) = cells[r][c]
         Shape.Init cell
 
     static member New(bits:uint16) = { Bits = bits }
@@ -90,24 +99,28 @@ type Shape = { Bits : uint16; } with
     static member Empty = Shape.New 0us
     static member Full = Shape.New 0x1FFus
 
-    override this.ToString() = this.Format
-    member this.Format = this.FormatSymbol Shape.Symbols[0]
-    member this.FormatSymbol symbol =
+    member this.FormatLines symbol =
         let getCellRow = this.GetCellRow
-        let cell b = if b then symbol else Shape.EmptySymbol
-        let row n = "│" + (getCellRow n |> Array.map cell |> String.Concat) + "│\n"
-        ("┌" + String('─',Shape.Width*2) + "┐\n") +
-        ([|0..Shape.Height-1|] |> Array.map row |> String.Concat) +  
-        ("└" + String('─',Shape.Width*2) + "┘\n")
+        let cellString b = if b then symbol else Shape.EmptySymbol
+        let rowString n = getCellRow n |> Array.map cellString |> String.Concat
+        [|
+            yield ("┌" + String('─',Shape.Width*2) + "┐")
+            for row in 0..Shape.Height-1 do
+                yield ("│" + rowString row + "│")
+            yield ("└" + String('─',Shape.Width*2) + "┘")
+        |]
+    member this.Format =  String.concat "\n" (this.FormatLines Shape.Symbols[0])
+    override this.ToString() = this.Format
+
     member this.Rotate90 = 
         let getCell  = this.GetCell
-        Shape.Init (fun r c -> getCell ((Shape.Width-1)-c,r))
+        Shape.Init (fun (r,c) -> getCell ((Shape.Width-1)-c,r))
     member this.FlipHorizontal =
         let getCell  = this.GetCell
-        Shape.Init (fun r c -> getCell (r,(Shape.Width-1)-c))
+        Shape.Init (fun (r,c) -> getCell (r,(Shape.Width-1)-c))
     member this.FlipVertical =
         let getCell  = this.GetCell
-        Shape.Init (fun r c -> getCell ((Shape.Height-1)-r,c))
+        Shape.Init (fun (r,c) -> getCell ((Shape.Height-1)-r,c))
 
     static member AllOrientations (shape:Shape) =
         let r0 = shape
@@ -120,7 +133,7 @@ type Shape = { Bits : uint16; } with
         let fV90 = fV.Rotate90
         [| r0; r90; r180; r270; fH; fV; fH90; fV90 |] |> Array.distinct
 
-[<StructuredFormatDisplay("{Width}x{Height}: {ShapeCounts}")>]
+[<StructuredFormatDisplay("{Width}x{Height}: {ShapeTypeCounts}")>]
 type Region = {
     Width: int
     Height: int
@@ -172,59 +185,85 @@ type ShapeSlots = { ShapeSlots:Shape[][] } with
 
 let addTuples (r1, c1) (r2, c2) = (r1 + r2, c1 + c2)
 
+[<StructuredFormatDisplay("{Format}")>]
 type RegionState = {
-    Shapes: Map<int*int, Shape>;
+    Region : Region;
+    PlacedShapes: Map<int*int, Shape>;
+    ShapeSlots: Map<int*int, Shape>;
     Cells: Set<int*int>;
-
+    ShapeTypeCounts: int[];
 } with
-    member this.GetShapeSlot (row:int, col:int) =
-        let getCell rowOffset colOffset =
-            let cellPos = (row + rowOffset, col + colOffset)
-            this.Cells.Contains cellPos
-        Shape.Init getCell 
+    member this.GetCell (row:int, col:int) =
+        this.Cells.Contains (row, col)
 
     member this.Item
-        with get key = this.GetShapeSlot key
+        with get key = this.GetCell key
 
-    member this.AddShape (row:int) (col:int) (shape:Shape) =
-        let newCells =
+    member this.ShapeTypeCountTotal = this.ShapeTypeCounts |> Array.sum
+
+    member this.PlaceShape (row:int,col:int) (shape:Shape) (shapeType:int) =
+        let newCells = 
             Shape.CellOffsets
             |> Seq.filter shape.GetCell
             |> Seq.map (addTuples (row, col))
             |> Set.ofSeq
-        {
-            Shapes = this.Shapes.Add ((row, col), shape)
+
+        let mutable newShapeSlots = this.ShapeSlots
+        for rowoffset,colOffset in Shape.AdjacentCellOffsets do
+            let r,c = row + rowoffset, col + colOffset
+            if r >= 0 && r <= this.Region.Height-2 && c >= 0 && c <= this.Region.Width-2 then
+                let getNewCell (rowOffset,colOffset) = newCells.Contains (r + rowOffset, c + colOffset)
+                let shapeSlot = Shape.Init getNewCell
+                newShapeSlots <- newShapeSlots.Add ((r,c), shapeSlot)
+
+        let newShapeTypeCounts = Array.copy this.ShapeTypeCounts
+        newShapeTypeCounts[shapeType] <- newShapeTypeCounts[shapeType] - 1
+        
+        { this with
+            PlacedShapes = this.PlacedShapes.Add ((row, col), shape)
+            ShapeSlots = newShapeSlots
             Cells = this.Cells + newCells
+            ShapeTypeCounts = newShapeTypeCounts
         }
 
-    static member New = { Shapes = Map.empty; Cells = Set.empty }
+    member this.GetShapeSlot (row:int, col:int) =
+        match this.ShapeSlots.TryFind (row, col) with
+        | Some shapeSlot -> shapeSlot
+        | None -> Shape.Empty
 
+    static member New region = { Region = region; PlacedShapes = Map.empty; ShapeSlots = Map.empty; Cells = Set.empty; ShapeTypeCounts = region.ShapeTypeCounts }
 
-let regionStateToCellStrings (region:Region) (regionState: RegionState) =
-    let mutable i = 0
-    let mutable cells = Array2D.create region.Height region.Width Shape.EmptySymbol
-    let setCell (symbol:string) (row:int, col:int) = cells[row,col] <- symbol
-    let setShapeCells (row:int, col:int) (shape:Shape) =
-        let symbol = Shape.Symbols[i % Shape.Symbols.Length]
-        i <- i + 1
-        Shape.CellOffsets
-        |> Seq.filter shape.GetCell
-        |> Seq.map (addTuples (row, col))
-        |> Seq.iter (setCell symbol)
+    member this.CellStrings =
+        let mutable i = 0
+        let mutable cells = Array2D.create this.Region.Height this.Region.Width Shape.EmptySymbol
+        let setCell (symbol:string) (row:int, col:int) = cells[row,col] <- symbol
+        let setShapeCells (row:int, col:int) (shape:Shape) =
+            let symbol = Shape.Symbols[i % Shape.Symbols.Length]
+            i <- i + 1
+            Shape.CellOffsets
+            |> Seq.filter shape.GetCell
+            |> Seq.map (addTuples (row, col))
+            |> Seq.iter (setCell symbol)
 
-    regionState.Shapes |> Map.iter setShapeCells
-    cells
+        this.PlacedShapes |> Map.iter setShapeCells
+        cells
 
-let regionStateToString (region:Region) (regionState: RegionState) =
-    let cellStrings = regionStateToCellStrings region regionState
+    member this.FormatLines =
+        [|
+            let cellStrings = this.CellStrings
+            for row in 0..cellStrings.GetLength(0)-1 do
+                yield cellStrings[row, *] |> String.Concat 
+        |]
+
+    member this.Format = this.FormatLines |> String.concat "\n"
+
+let regionStateToString (regionState: RegionState) =
+    let lines = regionState.FormatLines
     seq {
-        yield ("┌" + String('─',region.Width*2) + "┐\n")
-        for row: int in 0..(region.Height - 1) do
-            yield "│"
-            for col in 0..(region.Width - 1) do
-                yield cellStrings[row,col]
-            yield "│\n"
-        yield ("└" + String('─',region.Width*2) + "┘\n")
+        yield ("┌" + String('─',regionState.Region.Width*2) + "┐\n")
+        for row in 0..(lines.Length - 1) do
+            yield ("│" + lines[row] + "│\n")
+        yield ("└" + String('─',regionState.Region.Width*2) + "┘\n")
     }       
 
 let tryFitShapes shapes (region:Region) =
@@ -257,21 +296,19 @@ let tryFitShapes shapes (region:Region) =
         | Some shapeType -> Some (shape,shapeType)
         | _ -> None
 
-    let shapeTypeCounts = Array.copy region.ShapeTypeCounts
-    let mutable regionState: RegionState = RegionState.New
+    let mutable regionState: RegionState = RegionState.New region
 
     let addShape row col shape shapeType =
-        regionState <- regionState.AddShape row col shape
-        shapeTypeCounts[shapeType] <- shapeTypeCounts[shapeType] - 1
-        regionStateToString region regionState
+        regionState <- regionState.PlaceShape (row,col) shape shapeType
+        regionStateToString regionState
         |> Seq.iter (printf "%s")
-        printfn "%A" shapeTypeCounts
+        printfn "%A" regionState.ShapeTypeCounts
 
-    printfn "%A" shapeTypeCounts
+    printfn "%A" regionState.ShapeTypeCounts
 
     // Deliberately place the first shape in the top-left corner
     let firstShapeType = 
-        shapeTypeCounts
+        regionState.ShapeTypeCounts
         |> Array.mapi (fun i count -> (i, count))
         |> Array.filter (fun (_, count) -> count > 0)
         |> Array.head
@@ -280,21 +317,23 @@ let tryFitShapes shapes (region:Region) =
 
     for row in 0..(region.Height - Shape.Width) do
         for col in 01..(region.Width - Shape.Height) do
-            let shapeSlot = regionState[row, col]
-            printfn "Trying to fit shape at (%d,%d) into slot:\n%s" row col (shapeSlot.Format)
-            let possibleShapes = shapeSlots.GetShapesThatFit shapeSlot
-            
-            let bestFitShapeType = 
-                possibleShapes
-                |> Array.choose getShapeType
-                |> Array.filter (fun (shape2, shapeType) -> shapeTypeCounts[shapeType] > 0)
-                |> Array.tryHead
+            if regionState.ShapeTypeCountTotal = 0 then ()
+            else 
+                let shapeSlot = regionState.GetShapeSlot (row, col)
+                printfn "Trying to fit shape at (%d,%d) into slot:\n%s" row col (shapeSlot.Format)
+                let possibleShapes = shapeSlots.GetShapesThatFit shapeSlot
+                
+                let bestFitShapeType = 
+                    possibleShapes
+                    |> Array.choose getShapeType
+                    |> Array.filter (fun (shape2, shapeType) -> regionState.ShapeTypeCounts[shapeType] > 0)
+                    |> Array.tryHead
 
-            match bestFitShapeType with
-            | Some (shape, shapeType) -> addShape row col shape shapeType
-            | _ -> ()
+                match bestFitShapeType with
+                | Some (shape, shapeType) -> addShape row col shape shapeType
+                | _ -> ()
 
-    shapeTypeCounts
+    regionState.ShapeTypeCounts
 
 
 let result1 input = 
@@ -302,10 +341,20 @@ let result1 input =
     let shapes = readShapes lines
     let regions = readRegions lines[30..]
 
-    shapes |> Array.iteri (fun i shape -> printfn "%d:\n%s" i (shape.Format))
+    let shapeString i (shape:Shape) = shape.FormatLines Shape.Symbols[i]
+    let shapeStrings = shapes |> Array.mapi shapeString
+    printfn "Shapes:"
+    for i in 0..Shape.Height+1 do
+        for shapeString in shapeStrings do
+            printf "%s  " shapeString[i]
+        printfn ""
+    printfn ""
+
 
     regions
     |> Array.map (tryFitShapes shapes)
+    // regions
+    // |> Array.head |>  tryFitShapes shapes
 
 
 printfn "Part 1 Example: %A" (result1 "example.txt")
