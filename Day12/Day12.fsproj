@@ -12,6 +12,7 @@
   <ItemGroup>
     <Content Include="example.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="input.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="results.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

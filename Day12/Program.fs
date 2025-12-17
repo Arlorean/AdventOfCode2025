@@ -16,8 +16,8 @@ module Shape =
     let EmptySymbol = "🔘" //"╶╴"
     let Symbols = Array.concat [|
         [|"🟥";"🟦";"🟩";"🟨";"🟪";"🟫"|]
-        [|"🔴";"🔵";"🟢";"🟡";"🟣";"🟤"|]
-        [|"⚪";"⚫";"🔲";"🔳";"🔶";"🔷"|]
+        // [|"🔴";"🔵";"🟢";"🟡";"🟣";"🟤"|]
+        // [|"⚪";"⚫";"🔲";"🔳";"🔶";"🔷"|]
     |]
     let GetSymbol i = Symbols[i % Symbols.Length]
 
@@ -152,6 +152,7 @@ type Region = {
         { Width = width; Height = height; ShapeTypeCounts = shapeTypeCounts }
     member this.LastShapeRow = this.Height-Shape.Height
     member this.LastShapeCol = this.Width-Shape.Width
+    member this.Area = this.Width * this.Height
 
 
 let region = pint32 .>> pchar 'x' .>>. pint32 .>> pchar ':' .>>. parray 6 (spaces >>. pint32) .>> eof |>> Region.Create
@@ -326,32 +327,39 @@ let findSolutions (shapeTypes:Shape[]) (region:Region) =
         let stack = new Stack<RegionState>()
         stack.Push (RegionState.New region shapeTypes)
 
-        while stack.Count > 0 do
+        let mutable attemptCount = 0
+        while attemptCount < 1000 && stack.Count > 0 do
             let regionState = stack.Pop()
+            attemptCount <- attemptCount + 1
 
             //printSingleOption regionState.FormatLines
             //printfn "%A" regionState.ShapeTypeCounts
 
             if regionState.ShapeTypeCountTotal = 0 then
                 yield regionState
+            else 
+                let mutable options =
+                    regionState.ShapeSlots
+                    |> Map.toSeq
+                    |> Seq.map (fun (pos,(shapeSlot,_)) -> (pos,regionState.GetAvailableShapesTypes shapeSlot))
 
-            let mutable options =
-                regionState.ShapeSlots
-                |> Map.toSeq
-                |> Seq.map (fun (pos,(shapeSlot,_)) -> (pos,regionState.GetAvailableShapesTypes shapeSlot))
+                if (options |> Seq.isEmpty) then
+                    options <- seq { (regionState.EmptySlots |> Seq.head),(regionState.GetAvailableShapesTypes Shape.Empty) }  
 
-            if (options |> Seq.isEmpty) then
-                options <- seq { (regionState.EmptySlots |> Seq.head),(regionState.GetAvailableShapesTypes Shape.Empty) }  
+                if not (options |> Seq.isEmpty) then
+                    let orderedOptions = 
+                        options
+                        |> Seq.sortBy (fun (_, posOptions) -> Seq.length posOptions)
 
-            if not (options |> Seq.isEmpty) then
-                let orderedOptions = 
-                    options
-                    |> Seq.sortBy (fun (_, posOptions) -> Seq.length posOptions)
-
-                for (pos, posOptions) in orderedOptions do
-                    for shapeOption in posOptions do
-                        stack.Push <| regionState.PlaceShape pos shapeOption
+                    for (pos, posOptions) in orderedOptions do
+                        for shapeOption in posOptions do
+                            stack.Push <| regionState.PlaceShape pos shapeOption
     }
+
+let shapeTypesTotalCells (shapeTypes:Shape[]) (shapeTypeCounts: int[]) =
+    shapeTypes
+    |> Array.mapi (fun i shapeType -> shapeType.FullCount * shapeTypeCounts[i])
+    |> Array.sum
 
 let result1 input = 
     let lines = File.ReadAllLines(input)
@@ -360,23 +368,32 @@ let result1 input =
 
     let shapeString i (shape:Shape) = Shape.FormatLines Shape.Symbols[i] shape
     let shapeStrings = shapes |> Array.mapi shapeString
-    //printfn "Shapes:"
-    //printOptions shapeStrings
+
+    printfn "Shapes:"
+    printOptions shapeStrings
 
     let mutable solutionsFound = 0
     for i in 0..regions.Length-1 do
         printf "Region %d: %Ax%d, Shape Counts: %A - " i regions[i].Width regions[i].Height regions[i].ShapeTypeCounts
-        let solution = regions[i] |> (findSolutions shapes >> Seq.tryHead)
-        match solution with
-        | Some _ ->
-            solutionsFound <- solutionsFound + 1
-            printfn "Solution Found! - Total = %d" solutionsFound
-        | None ->
-            printfn "No Solution."
+       
+        let regionArea = regions[i].Area
+        let totalShapeCells = shapeTypesTotalCells shapes regions[i].ShapeTypeCounts
+        if (regionArea < totalShapeCells) then
+            printfn "No Solution - (%d*%d=%d<%d)" regions[i].Width regions[i].Height regionArea totalShapeCells
+        else
+            let solution = regions[i] |> (findSolutions shapes >> Seq.tryHead)
+            match solution with
+            | Some regionState ->
+                solutionsFound <- solutionsFound + 1
+                printfn "Solution Found! - Total = %d" solutionsFound
+                printSingleOption regionState.FormatLines
+            | None ->
+                printfn "No Solution."
 
     solutionsFound
 
 
-//printfn "Part 1 Example: %A" (result1 "example.txt")
+printfn "Part 1 Example: %A" (result1 "example.txt")
+
 printfn "Part 1 Result: %A" (result1 "input.txt")
 
