@@ -1,4 +1,5 @@
 ﻿open System
+open System.Collections.Generic
 open System.IO
 open System.Numerics
 open FParsec
@@ -260,7 +261,7 @@ type RegionState = {
 
     member this.GetAvailableShapesTypes shapeSlot =
         this.ShapeSlotOptions.GetShapesThatFit shapeSlot
-        |> Array.filter (fun (_, shapeType) -> this.ShapeTypeCounts[int shapeType] > 0)
+        |> Seq.filter (fun (_, shapeType) -> this.ShapeTypeCounts[int shapeType] > 0)
 
     static member New region shapeTypes = { 
         Region = region
@@ -320,55 +321,37 @@ let printOptions (linesForOptions:string[][]) =
 
 let printSingleOption optionLines = printOptions [|optionLines|]
 
-let tryFitShapes shapeTypes (region:Region) =
-    let mutable regionState: RegionState = RegionState.New region shapeTypes
+let findSolutions (shapeTypes:Shape[]) (region:Region) =
+    seq {
+        let stack = new Stack<RegionState>()
+        stack.Push (RegionState.New region shapeTypes)
 
-    // Deliberately place the first shape in the top-left corner
-    let firstShapeTypeIndex = 
-        regionState.ShapeTypeCounts
-        |> Array.mapi (fun i count -> (i, count))
-        |> Array.filter (fun (_, count) -> count > 0)
-        |> Array.head
-        |> (fst >> enum<ShapeTypeIndex>)
-    regionState <- regionState.PlaceShape (0, 0) (shapeTypes[int firstShapeTypeIndex], firstShapeTypeIndex)
+        while stack.Count > 0 do
+            let regionState = stack.Pop()
 
-    let mutable shapePlaced = true
-    while shapePlaced && regionState.ShapeTypeCountTotal > 0 do
-        printSingleOption regionState.FormatLines
-        printfn "%A" regionState.ShapeTypeCounts
+            //printSingleOption regionState.FormatLines
+            //printfn "%A" regionState.ShapeTypeCounts
 
-        let placeShapeOptions =
-            regionState.ShapeSlots
-            |> Map.toSeq
-            |> Seq.map (fun ((row,col),(shapeSlot,_)) -> (row,col),regionState.GetAvailableShapesTypes shapeSlot)
-            |> Seq.filter (fun (_, shapeOptions) -> shapeOptions.Length > 0)
+            if regionState.ShapeTypeCountTotal = 0 then
+                yield regionState
 
-        if (placeShapeOptions |> Seq.isEmpty) then
-            if (regionState.EmptySlots |> Seq.isEmpty) then
-                printfn "No place shape options available, stopping."
-                shapePlaced <- false          
-            else
-                let (row: int,col) = (regionState.EmptySlots |> Seq.head)
-                let shapeOptions = (regionState.GetAvailableShapesTypes Shape.Empty)
-                let (shape,shapeTypeIndex) = shapeOptions[0]
-                printfn "No place shape options, placing first available shape in first empty slot:\n"
-                printfn "  At (%d,%d): %d options (only showing first)" row col shapeOptions.Length
+            let mutable options =
+                regionState.ShapeSlots
+                |> Map.toSeq
+                |> Seq.map (fun (pos,(shapeSlot,_)) -> (pos,regionState.GetAvailableShapesTypes shapeSlot))
 
-                printSingleOption (Shape.FormatLines regionState.NextShapeSymbol shape)
+            if (options |> Seq.isEmpty) then
+                options <- seq { (regionState.EmptySlots |> Seq.head),(regionState.GetAvailableShapesTypes Shape.Empty) }  
 
-                regionState <- regionState.PlaceShape (row,col) (shape,shapeTypeIndex)
-        else
-            printfn "Place shape options: %d" (placeShapeOptions |> Seq.length)
-            for ((row,col), shapeOptions) in placeShapeOptions do
-                printfn "  At (%d,%d): %d options" row col shapeOptions.Length
-                shapeOptions |> Array.map fst |> Array.map (Shape.FormatLines regionState.NextShapeSymbol) |> printOptions
-            
-            let ((row: int,col), shapeTypeTuples) = 
-                placeShapeOptions
-                |> Seq.minBy (fun (_, shapeTypeTuples) -> shapeTypeTuples.Length)
-            regionState <- regionState.PlaceShape (row,col) shapeTypeTuples[0]
+            if not (options |> Seq.isEmpty) then
+                let orderedOptions = 
+                    options
+                    |> Seq.sortBy (fun (_, posOptions) -> Seq.length posOptions)
 
-    regionState.ShapeTypeCounts
+                for (pos, posOptions) in orderedOptions do
+                    for shapeOption in posOptions do
+                        stack.Push <| regionState.PlaceShape pos shapeOption
+    }
 
 let result1 input = 
     let lines = File.ReadAllLines(input)
@@ -377,15 +360,23 @@ let result1 input =
 
     let shapeString i (shape:Shape) = Shape.FormatLines Shape.Symbols[i] shape
     let shapeStrings = shapes |> Array.mapi shapeString
-    printfn "Shapes:"
-    printOptions shapeStrings
+    //printfn "Shapes:"
+    //printOptions shapeStrings
 
-    // regions
-    // |> Array.map (tryFitShapes shapes)
-    regions
-    |> Array.skip 1 |> Array.head |> tryFitShapes shapes
+    let mutable solutionsFound = 0
+    for i in 0..regions.Length-1 do
+        printf "Region %d: %Ax%d, Shape Counts: %A - " i regions[i].Width regions[i].Height regions[i].ShapeTypeCounts
+        let solution = regions[i] |> (findSolutions shapes >> Seq.tryHead)
+        match solution with
+        | Some _ ->
+            solutionsFound <- solutionsFound + 1
+            printfn "Solution Found! - Total = %d" solutionsFound
+        | None ->
+            printfn "No Solution."
+
+    solutionsFound
 
 
-printfn "Part 1 Example: %A" (result1 "example.txt")
-//printfn "Part 1 Result: %A" (result1 "input.txt")
+//printfn "Part 1 Example: %A" (result1 "example.txt")
+printfn "Part 1 Result: %A" (result1 "input.txt")
 
