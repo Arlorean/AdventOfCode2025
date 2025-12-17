@@ -6,32 +6,32 @@
 <tr>
 <td style="white-space: nowrap;"><pre>
 🟥🟥🟥
-🔘🔘🟥
-🟥🟥🟥
+🟥🟥🔘
+🟥🟥🔘
 </pre></td>
 <td style="white-space: nowrap;"><pre>
-🔘🔘🟦
-🔘🟦🟦
+🟦🟦🟦
 🟦🟦🔘
+🔘🟦🟦
 </pre></td>
 <td style="white-space: nowrap;"><pre>
-🟩🟩🔘
+🔘🟩🟩
 🟩🟩🟩
-🟩🔘🟩
+🟩🟩🔘
 </td></pre>
 <td style="white-space: nowrap;"><pre>
+🟨🟨🔘
 🟨🟨🟨
-🔘🟨🟨
-🔘🔘🟨
+🟨🟨🔘
 </td></pre>
 <td style="white-space: nowrap;"><pre>
-🟪🔘🟪
 🟪🟪🟪
-🟪🔘🟪
+🟪🔘🔘
+🟪🟪🟪
 </td></pre>
 <td style="white-space: nowrap;"><pre>
-🔘🔘🟫
 🟫🟫🟫
+🔘🟫🔘
 🟫🟫🟫
 </td></pre>
 </tr>
@@ -83,7 +83,7 @@ NO SOLUTION FOUND
 > [!NOTE]  
 > `469` regions were too small  
 > `531` regions had a solution  
-> *Region 538 was problematic*  
+> *Region `538` was problematic*  
 
 
 ## Shapes
